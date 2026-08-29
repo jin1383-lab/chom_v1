@@ -16,12 +16,6 @@ DATA_PATH = os.path.join(BASE_DIR, "data.json")
 BACKUP_PATH = os.path.join(BASE_DIR, "data.json.bak")
 API_BASE = "https://www.googleapis.com/youtube/v3"
 KINDS = ("videos", "channels")
-LATEST_COUNT = 5
-BREAKOUT_DAYS = 28
-BREAKOUT_MAX_PAGES = 3
-BREAKOUT_MAX_PER_CHANNEL = 50
-BREAKOUT_MAX_ITEMS = 3000
-MAX_CATEGORY_LENGTH = 30
 USER_FIELDS = ("note", "tags", "rating", "category", "order", "addedAt", "history", "latest", "latestCheckedAt")
 
 # ---------------------------------------------------------------- 데이터 관리 도우미
@@ -34,7 +28,7 @@ def empty_data():
         "channels": [],
         "categories": {"videos": [], "channels": []},
         "breakout": empty_breakout(),
-        "meta": {"lastAutoCheck": ""},
+        "meta": {"lastAutoCheck": "", "apiKey": ""},
     }
 
 def migrate(data):
@@ -54,6 +48,7 @@ def migrate(data):
         breakout.setdefault("days", 0)
     meta = data.setdefault("meta", {})
     meta.setdefault("lastAutoCheck", "")
+    meta.setdefault("apiKey", "")
 
     for kind in KINDS:
         for item in data[kind]:
@@ -323,14 +318,34 @@ if "data" not in st.session_state:
 
 data = st.session_state.data
 
+# API Key 기본값 탐색 우선순위:
+# 1. Streamlit Secrets (st.secrets["YOUTUBE_API_KEY"])
+# 2. 저장된 data.json 내 meta.apiKey
+default_api_key = ""
+if "YOUTUBE_API_KEY" in st.secrets:
+    default_api_key = st.secrets["YOUTUBE_API_KEY"]
+elif data.get("meta", {}).get("apiKey"):
+    default_api_key = data["meta"]["apiKey"]
+
 st.title("📌 촘촘의 레퍼런스 수집기 v1.0.0")
 
 # 사이드바: API Key 및 수집 폼
 with st.sidebar:
     st.header("⚙️ 설정 및 수집")
     
-    api_key = st.text_input("YouTube Data API v3 Key", type="password", help="Google Cloud Console에서 발급받은 API 키를 입력하세요.")
+    api_key = st.text_input(
+        "YouTube Data API v3 Key", 
+        value=default_api_key, 
+        type="password", 
+        help="한 번 입력해 저장해두면 다음부터 자동으로 불러옵니다."
+    )
     
+    # API 키 저장 버튼
+    if st.button("API Key 저장"):
+        data["meta"]["apiKey"] = api_key.strip()
+        save_data(data)
+        st.toast("API Key가 기본값으로 저장되었습니다.")
+
     st.divider()
     st.subheader("➕ URL / ID 추가")
     input_text = st.text_area("유튜브 영상 또는 채널 주소를 입력하세요.", height=120)
@@ -349,6 +364,10 @@ with st.sidebar:
         else:
             cat_to_apply = new_cat_input.strip() if new_cat_input.strip() else (selected_category if selected_category != "(선택 없음)" else "")
             try:
+                # 입력된 API 키 자동 저장
+                if api_key.strip() != data.get("meta", {}).get("apiKey"):
+                    data["meta"]["apiKey"] = api_key.strip()
+
                 summary = add_from_text(data, input_text, api_key, category=cat_to_apply, category_kind=tab_kind)
                 save_data(data)
                 st.session_state.data = data
